@@ -3,12 +3,13 @@
 ;;; Commentary:
 
 ;; Common definitions shared across pi-coding-agent test files.
-;; Centralizes timeout values, the mock-session macro, and toolcall
-;; streaming helpers for easy adjustment (e.g., slow CI).
+;; Centralizes timeout values, fake-pi launch helpers, the mock-session
+;; macro, and toolcall streaming helpers for easy adjustment (e.g., slow CI).
 
 ;;; Code:
 
 (require 'cl-lib) ; for cl-letf in mock-session macro
+(require 'ert)
 
 ;;; Timeout Configuration
 
@@ -22,21 +23,68 @@
   "Timeout in seconds for RPC calls in tests.")
 
 (defvar pi-coding-agent-test-integration-timeout 600
-  "Timeout in seconds for integration tests.
-The steer test requires two LLM round-trips.  With qwen3:1.7b at
-maxTokens=500 on CPU-only CI runners, each turn can take up to 150s.
-Two turns: ~300s.  600s provides sufficient margin for noisy runners.")
+  "Timeout in seconds for real-backend integration tests.
+The shared contract still includes multi-turn model interactions, so the real
+lane keeps a generous timeout for slower CI runners.")
 
 (defvar pi-coding-agent-test-gui-timeout 180
-  "Timeout in seconds for GUI tests (includes real LLM responses).
-qwen3:1.7b tool calls take 50-65s on CI (5x local speed).  The
-previous 90s timeout gave only 38%% margin; 180s gives ~177%%.")
+  "Timeout in seconds for GUI tests.
+The GUI suite is fake-backed, but it still waits for real Emacs window updates,
+redisplay, and subprocess event delivery.")
 
 ;;;; Formatting Helpers
 
 (defun pi-coding-agent-test-format-elapsed (seconds)
   "Format SECONDS as a human-readable duration with millisecond precision."
   (format "%.3fs" (float seconds)))
+
+;;;; Fake-pi Helpers
+
+(defconst pi-coding-agent-test-fake-pi-script
+  (expand-file-name "support/fake_pi.py"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "Absolute path to the fake-pi harness script.")
+
+(defun pi-coding-agent-test-python-executable ()
+  "Return a Python executable path, or skip if none is available."
+  (or (executable-find "python3")
+      (executable-find "python")
+      (ert-skip "python3 or python not found")))
+
+(defun pi-coding-agent-test-fake-pi-executable ()
+  "Return the command list for launching the fake-pi harness.
+Uses python3 in the test suite so local and CI runs do not need a
+separate uv dependency, while the script itself still keeps uv metadata
+and an executable shebang for manual runs."
+  (list (pi-coding-agent-test-python-executable)
+        pi-coding-agent-test-fake-pi-script))
+
+(defun pi-coding-agent-test-fake-pi-extra-args (scenario &optional extra-args)
+  "Return fake-pi CLI args for SCENARIO plus optional EXTRA-ARGS."
+  (append (list "--scenario" scenario) extra-args))
+
+(defun pi-coding-agent-test-backend-spec
+    (backend default-fake-scenario &optional fake-scenario fake-extra-args)
+  "Return shared backend launch data for BACKEND.
+DEFAULT-FAKE-SCENARIO is used when BACKEND is `fake' and FAKE-SCENARIO is
+nil.  FAKE-EXTRA-ARGS are appended after the generated fake-pi scenario args."
+  (pcase backend
+    ('fake
+     (let* ((scenario (or fake-scenario default-fake-scenario))
+            (extra-args (pi-coding-agent-test-fake-pi-extra-args
+                         scenario fake-extra-args)))
+       (list :name 'fake
+             :label (format "fake:%s" scenario)
+             :executable (pi-coding-agent-test-fake-pi-executable)
+             :extra-args extra-args
+             :scenario scenario)))
+    ('real
+     (list :name 'real
+           :label "real"
+           :executable pi-coding-agent-executable
+           :extra-args pi-coding-agent-extra-args))
+    (_
+     (error "Unknown test backend: %S" backend))))
 
 ;;;; Batch Emacs Helpers
 
