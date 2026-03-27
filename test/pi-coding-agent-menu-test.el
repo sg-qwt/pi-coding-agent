@@ -337,6 +337,19 @@ BINDING-SPEC is (DIR CHAT-NAME INPUT-NAME PROC).  DIR is evaluated once."
       (should-not (get-buffer input-name))
       (should (<= prompt-count 1)))))
 
+(ert-deftest pi-coding-agent-test-quit-without-confirmation-kills-both-without-prompt ()
+  "When configured, quitting a live session kills both buffers without prompting."
+  (let ((pi-coding-agent-quit-without-confirmation t))
+    (pi-coding-agent-test--with-quit-confirmable-session
+        ("/tmp/pi-coding-agent-test-quit-no-confirm/" chat-name input-name _proc)
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _)
+                   (ert-fail "pi-coding-agent-quit prompted unexpectedly"))))
+        (with-current-buffer input-name
+          (pi-coding-agent-quit)))
+      (should-not (get-buffer chat-name))
+      (should-not (get-buffer input-name)))))
+
 (ert-deftest pi-coding-agent-test-kill-chat-kills-input ()
   "Killing chat buffer also kills input buffer."
   (pi-coding-agent-test-with-mock-session "/tmp/pi-coding-agent-test-linked/"
